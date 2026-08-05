@@ -79,3 +79,13 @@ def test_character_conditions_have_independent_channels_and_positions():
     first_center = positions[0, 0].flatten().argmax()
     second_center = positions[1, 0].flatten().argmax()
     assert first_center != second_center
+
+
+def test_character_mode_rejects_words_longer_than_checkpoint_limit():
+    spec = VideoSpec(frames=4, size=16, width=32, glyph_size=8, max_chars=4)
+    try:
+        build_character_sequence_condition(("HELLO",), "circle", spec)
+    except ValueError as error:
+        assert "at most 4" in str(error)
+    else:
+        raise AssertionError("expected a length validation error")

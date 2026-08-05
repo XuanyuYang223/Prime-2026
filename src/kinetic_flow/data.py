@@ -173,8 +173,13 @@ def build_character_sequence_condition(words: tuple[str, ...] | list[str], motio
     word_shapes: list[tuple[int, int]] = []
     base_spacing = max(1, spec.glyph_size // 10)
     for word in words:
+        if len(word) > channels:
+            raise ValueError(
+                f"word {word!r} has {len(word)} characters, but this checkpoint supports at most "
+                f"{channels}; use a word-level checkpoint or train with a larger --max-chars"
+            )
         spacing = base_spacing
-        chars = [render_glyph(char, spec).copy() for char in word.upper()[:channels]]
+        chars = [render_glyph(char, spec).copy() for char in word.upper()]
         total_width = sum(g.shape[1] for g in chars) + spacing * max(0, len(chars) - 1)
         scale = min(1.0, (width - 4) / max(1, total_width))
         if scale < 1:

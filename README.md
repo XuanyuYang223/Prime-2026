@@ -146,3 +146,4 @@ This is intentionally a teaching prototype: 32×32 grayscale frames and a fixed 
 - [`docs/PRIME_PRESENTATION.md`](docs/PRIME_PRESENTATION.md): slide-ready final-project narrative
 - [`docs/PROCESS_LOG.md`](docs/PROCESS_LOG.md): implementation decisions and verification record
 - [`docs/TRAINING_LOG.md`](docs/TRAINING_LOG.md): chronological English-sentence training record
+- [`docs/PRIME_FINAL_PROJECT.tex`](docs/PRIME_FINAL_PROJECT.tex): 30-frame Beamer final-project deck

@@ -54,7 +54,7 @@ Suggested reading order: run `demo.py`, inspect `data.py`, read `flow.py`, then 
 
 ## Reproduce the main experiment
 
-The training data is generated during loading; there is no downloaded dataset. Each sample is determined by the dataset seed and index.
+The training data is generated during loading; there is no downloaded dataset. Each sample is determined by the dataset seed and index. An [exported training example](assets/dataset_example/condition_overview.png) shows the target video, glyph channels, position heatmaps, and aligned layout used by the model.
 
 ```bash
 python train.py \

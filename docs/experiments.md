@@ -2,50 +2,63 @@
 
 ## Setup
 
-All training clips are rendered online with Pillow. The generator selects text and one of four trajectories from a deterministic random stream based on the dataset seed and sample index. No external image or video dataset is used.
+All clips are rendered online with Pillow. Text and one of four trajectories come from a deterministic random stream based on the dataset seed and sample index. No external image or video dataset is used.
 
-The final character experiment uses 12 frames at 64 by 128 pixels, a glyph size of 42, up to eight characters, 16 base channels, a batch size of 4, 10,000 optimizer steps, a foreground weight of 5, and 20 Euler steps at evaluation time. The condition has separate glyph, position, and aligned-layout channels for each character.
+The main experiment uses 12 frames at 64 by 128 pixels, a glyph size of 42, up to eight characters, 16 base channels, a batch size of 4, a foreground weight of 5, and 20 Euler steps at evaluation time.
 
-Evaluation uses eight fixed synthetic samples. MSE is measured in the model's `[-1, 1]` range. Dice is the overlap between target foreground pixels and generated pixels after selecting the best of the tested thresholds.
+Each character has two condition channels:
 
-## Main comparison
+```text
+canonical glyph + position heatmap
+```
 
-| Model | MSE | Dice |
-| --- | ---: | ---: |
-| Word-level baseline | 0.009147 | 0.785849 |
-| Character-level model | **0.000022** | **0.995071** |
+For eight character slots, the model receives 16 condition channels. It never receives glyphs already moved into their target locations.
 
-The word baseline has one glyph channel and one position channel for the current word. The character model has independent channels for every letter, so it receives much more exact spatial information. The comparison answers whether explicit character geometry can be preserved; it is not a claim about open-domain video quality.
+Evaluation uses eight fixed synthetic samples with data seed 9000 and noise seed 123. MSE is measured in the model's `[-1, 1]` range. Dice is the best overlap at thresholds `-0.6`, `-0.5`, and `-0.4`.
 
-## Word-level ablations
+## Checkpoint sweep
 
-| Change | Dice |
-| --- | ---: |
-| 48x96 baseline | 0.746000 |
-| 64x128, 16 base channels | 0.777538 |
-| 20,000 training steps | 0.771100 |
-| 96x192 resolution | 0.761575 |
-| 24 base channels | 0.754837 |
-| Layout guidance 0.1 | **0.785849** |
+| Training step | MSE | Dice |
+| ---: | ---: | ---: |
+| 1,000 | 0.037667 | 0.474000 |
+| 2,000 | 0.032938 | 0.516422 |
+| 3,000 | 0.030971 | 0.531150 |
+| 4,000 | 0.033443 | 0.527077 |
+| 5,000 | 0.031324 | 0.535185 |
+| 6,000 | 0.031031 | 0.538019 |
+| 7,000 | 0.031318 | 0.545025 |
+| **8,000** | **0.030199** | **0.553023** |
+| 9,000 | 0.030856 | 0.548857 |
+| 10,000 | 0.030864 | 0.550446 |
 
-Increasing resolution, width, or training length did not improve Dice by itself. Mild layout guidance gave the best word-level score, while stronger guidance copied condition artifacts into the sample.
+The 8,000-step checkpoint is the main model. It learns approximate character positions and motion, but the generated letter shapes are still visibly distorted.
+
+## Discarded aligned-layout experiment
+
+An earlier version also supplied each character already translated into its target location. It reported MSE `0.000022` and Dice `0.995071`, but this was target leakage:
+
+$$x_{\mathrm{target}} \approx 2\max_i(\mathrm{aligned\ layout}_i)-1.$$
+
+Across 32 checked samples, the maximum pixel difference was only `1.49e-8`. The model could reconstruct the answer by merging the aligned channels, so that checkpoint and score are not used as the main result.
 
 ## Reproduction commands
 
-Train the character model:
+Train and save checkpoints every 1,000 steps:
 
 ```bash
 python train.py \
   --data-mode character --frames 12 --size 64 --width 128 \
   --glyph-size 42 --max-chars 8 --base-channels 16 --batch-size 4 \
-  --aligned-glyph --foreground-weight 5 --steps 10000 \
+  --foreground-weight 5 --steps 10000 --save-every 1000 \
   --output outputs/character/model.pt
 ```
 
-Evaluate it:
+Evaluate one checkpoint:
 
 ```bash
-python evaluate.py --checkpoint outputs/character/model.pt --samples 8 --ode-steps 20
+python evaluate.py \
+  --checkpoint outputs/character/model_step_8000.pt \
+  --samples 8 --data-seed 9000 --noise-seed 123 --ode-steps 20
 ```
 
 Generate a custom sequence from the included checkpoint:
@@ -54,4 +67,4 @@ Generate a custom sequence from the included checkpoint:
 python demo.py --text "MAKE TEXT MOVE" --motion circle
 ```
 
-Words longer than eight characters require either the word-level model or a new character model trained with a larger `--max-chars` value.
+Words longer than eight characters require a new character model trained with a larger `--max-chars` value.

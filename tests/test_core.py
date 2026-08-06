@@ -7,7 +7,7 @@ from kinetic_flow.data import (
     build_sequence_condition,
     build_video_condition,
 )
-from kinetic_flow.flow import align_glyph_to_positions, euler_sample, flow_matching_loss
+from kinetic_flow.flow import euler_sample, flow_matching_loss
 from kinetic_flow.model import ConditionalVideoFlow
 
 
@@ -52,15 +52,6 @@ def test_crossfade_creates_a_blended_condition():
     assert not torch.equal(cut_glyph, fade_glyph)
 
 
-def test_aligned_glyph_moves_toward_position_peak():
-    spec = VideoSpec(frames=2, size=16, width=32, glyph_size=8)
-    _, glyph, positions = build_video_condition("GO", "horizontal", spec)
-    aligned = align_glyph_to_positions(glyph.unsqueeze(0), positions.unsqueeze(0))
-    left_mass = aligned[0, 0, 0, :, :16].sum()
-    right_mass = aligned[0, 0, 0, :, 16:].sum()
-    assert left_mass > right_mass
-
-
 def test_foreground_weighted_loss_is_finite():
     spec = VideoSpec(frames=2, size=8, glyph_size=5)
     target, glyph, positions = build_video_condition("A", "vertical", spec)
@@ -72,13 +63,19 @@ def test_foreground_weighted_loss_is_finite():
 
 def test_character_conditions_have_independent_channels_and_positions():
     spec = VideoSpec(frames=6, size=24, width=48, glyph_size=12, max_chars=8)
-    video, glyphs, positions, layouts = build_character_sequence_condition(("MOVE", "TYPE"), "vertical", spec)
+    video, glyphs, positions = build_character_sequence_condition(("MOVE", "TYPE"), "vertical", spec)
     assert video.shape == (1, 6, 24, 48)
-    assert glyphs.shape == positions.shape == layouts.shape == (8, 6, 24, 48)
+    assert glyphs.shape == positions.shape == (8, 6, 24, 48)
     assert glyphs[0].sum() > 0 and glyphs[3].sum() > 0 and glyphs[4].sum() == 0
     first_center = positions[0, 0].flatten().argmax()
     second_center = positions[1, 0].flatten().argmax()
     assert first_center != second_center
+
+
+def test_character_dataset_exposes_only_glyph_and_position_conditions():
+    item = KineticTypographyDataset(length=1, mode="character")[0]
+    assert "aligned" not in item
+    assert set(item) == {"video", "glyph", "positions", "text", "motion"}
 
 
 def test_character_mode_rejects_words_longer_than_checkpoint_limit():

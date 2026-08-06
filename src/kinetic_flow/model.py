@@ -37,10 +37,9 @@ class ConditionalVideoFlow(nn.Module):
         self.dec = ResBlock(base_channels, time_dim)
         self.out = nn.Conv3d(base_channels, 1, 3, padding=1)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor, glyph: torch.Tensor, positions: torch.Tensor,
-                aligned_glyph: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor, glyph: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
         temb = self.time_mlp(t.reshape(-1, 1))
-        conditions = (glyph, positions) if aligned_glyph is None else (glyph, positions, aligned_glyph)
+        conditions = (glyph, positions)
         actual_channels = sum(condition.shape[1] for condition in conditions)
         if actual_channels != self.condition_channels:
             raise ValueError(f"model expects {self.condition_channels} condition channels, got {actual_channels}")

@@ -165,7 +165,7 @@ def build_sequence_condition(words: tuple[str, ...] | list[str], motion: str, sp
 
 
 def build_character_sequence_condition(words: tuple[str, ...] | list[str], motion: str, spec: VideoSpec):
-    """Render word sequences with a separate glyph, heatmap, and layout channel per character."""
+    """Render word sequences with a separate glyph and position channel per character."""
     if not words:
         raise ValueError("words cannot be empty")
     width, height, channels = spec.frame_width, spec.size, spec.max_chars
@@ -203,7 +203,6 @@ def build_character_sequence_condition(words: tuple[str, ...] | list[str], motio
     video = np.zeros((spec.frames, height, width), dtype=np.float32)
     glyphs = np.zeros((channels, spec.frames, height, width), dtype=np.float32)
     positions = np.zeros_like(glyphs)
-    layouts = np.zeros_like(glyphs)
     yy, xx = np.mgrid[:height, :width]
 
     def place(canvas: np.ndarray, glyph: np.ndarray, cx: float, cy: float) -> None:
@@ -224,7 +223,6 @@ def build_character_sequence_condition(words: tuple[str, ...] | list[str], motio
             phase = 2 * math.pi * frame / spec.frames + char_index * math.pi / 3
             char_y = base_y + math.sin(phase) * max(1.0, (height - max_shape[0]) / 12)
             place(video[frame], glyph, char_x, char_y)
-            place(layouts[char_index, frame], glyph, char_x, char_y)
             place(glyphs[char_index, frame], glyph, width / 2, height / 2)
             positions[char_index, frame] = np.exp(-((xx - char_x) ** 2 + (yy - char_y) ** 2) / (2 * 2.0**2))
             cursor += gw + spacing
@@ -233,7 +231,6 @@ def build_character_sequence_condition(words: tuple[str, ...] | list[str], motio
         torch.from_numpy(video[None] * 2 - 1),
         torch.from_numpy(glyphs),
         torch.from_numpy(positions),
-        torch.from_numpy(layouts),
     )
 
 
@@ -273,13 +270,11 @@ class KineticTypographyDataset(Dataset):
                 words = rng.choice(SEQUENCES)
             text = " ".join(words)
             if self.mode == "character":
-                video, glyph, positions, aligned = build_character_sequence_condition(words, motion, self.spec)
+                video, glyph, positions = build_character_sequence_condition(words, motion, self.spec)
             else:
                 video, glyph, positions = build_sequence_condition(words, motion, self.spec)
         else:
             text = rng.choice(PHRASES if self.mode == "phrase" else WORDS)
             video, glyph, positions = build_video_condition(text, motion, self.spec)
         item = {"video": video, "glyph": glyph, "positions": positions, "text": text, "motion": motion}
-        if self.mode == "character":
-            item["aligned"] = aligned
         return item

@@ -23,8 +23,9 @@ The last command loads the included checkpoint and writes `outputs/make_text_mov
 The complete video is represented as one tensor rather than generated frame by frame. For each visible character, the condition contains:
 
 - its canonical glyph;
-- a Gaussian heatmap for its position in every frame;
-- the glyph aligned to that position.
+- a Gaussian heatmap for its position in every frame.
+
+The target layout is not provided to the model. With eight character slots, the checkpoint receives 16 condition channels: eight glyph channels and eight position channels.
 
 The included model supports up to eight characters per displayed word. A sentence such as `MAKE TEXT MOVE` is divided across the 12-frame clip, so the model learns both character motion and word changes.
 
@@ -54,13 +55,13 @@ Suggested reading order: run `demo.py`, inspect `data.py`, read `flow.py`, then 
 
 ## Reproduce the main experiment
 
-The training data is generated during loading; there is no downloaded dataset. Each sample is determined by the dataset seed and index. An [exported training example](assets/dataset_example/condition_overview.png) shows the target video, glyph channels, position heatmaps, and aligned layout used by the model.
+The training data is generated during loading; there is no downloaded dataset. Each sample is determined by the dataset seed and index. An [exported training example](assets/dataset_example/condition_overview.png) shows the target video, glyph channels, and position heatmaps.
 
 ```bash
 python train.py \
   --data-mode character --frames 12 --size 64 --width 128 \
   --glyph-size 42 --max-chars 8 --base-channels 16 --batch-size 4 \
-  --aligned-glyph --foreground-weight 5 --steps 10000 \
+  --foreground-weight 5 --steps 10000 --save-every 1000 \
   --output outputs/character/model.pt
 
 python evaluate.py \
@@ -72,14 +73,13 @@ Training and sampling options are available through `python train.py --help` and
 
 ## Results
 
-Both models were evaluated on a fixed synthetic validation set. Dice measures overlap after thresholding the generated glyph pixels.
+The 8,000-step checkpoint was selected from a sweep on eight fixed synthetic validation samples. Dice measures overlap after thresholding the generated glyph pixels.
 
-| Model | MSE | Dice |
+| Conditions | MSE | Dice |
 | --- | ---: | ---: |
-| Word-level baseline | 0.009147 | 0.785849 |
-| Character-level model | **0.000022** | **0.995071** |
+| Per-character glyph + position | 0.030199 | 0.553023 |
 
-The character result is much stronger partly because the aligned per-character layout is a highly explicit condition. It should be read as a proof that the model can preserve supplied geometry, not as a benchmark on natural video.
+An earlier model reached Dice 0.995 by receiving an aligned glyph layout. That tensor reconstructed the target almost exactly, so the run was discarded as target leakage. The current result is lower but measures the intended task.
 
 ## Design choices and limitations
 
@@ -88,7 +88,7 @@ The character result is much stronger partly because the aligned per-character l
 - Sentence timing is predefined rather than inferred from language.
 - Motions come from four procedural trajectory families: horizontal, vertical, bounce, and circle.
 - The renderer uses a single local font and the model has not been tested on real advertising footage.
-- The final character model uses no extra layout guidance during sampling.
+- Characters in the current output are often distorted; position is learned more reliably than readable shape.
 
 ## References
 

@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from kinetic_flow.data import KineticTypographyDataset, VideoSpec
-from kinetic_flow.flow import align_glyph_to_positions, euler_sample
+from kinetic_flow.flow import euler_sample
 from kinetic_flow.model import ConditionalVideoFlow
 
 
@@ -20,7 +20,6 @@ def main():
     p.add_argument("--ode-steps", type=int, default=60)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--thresholds", type=float, nargs="+", default=[-0.6, -0.5, -0.4])
-    p.add_argument("--layout-guidance", type=float, default=0.0)
     args = p.parse_args()
 
     checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=True)
@@ -36,11 +35,7 @@ def main():
     model = ConditionalVideoFlow(checkpoint["base_channels"], condition_channels=condition_channels).to(args.device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
-    if checkpoint.get("aligned_glyph", False):
-        aligned = batch["aligned"].to(args.device) if data_mode == "character" else align_glyph_to_positions(glyph, positions)
-    else:
-        aligned = None
-    generated = euler_sample(model, glyph, positions, args.ode_steps, args.noise_seed, aligned, args.layout_guidance).cpu()
+    generated = euler_sample(model, glyph, positions, args.ode_steps, args.noise_seed).cpu()
     foreground = target > -0.5
 
     print(f"checkpoint: {args.checkpoint}")

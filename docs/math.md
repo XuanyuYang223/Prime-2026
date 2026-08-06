@@ -8,7 +8,7 @@ $$x \in \mathbb{R}^{C \times T \times H \times W},$$
 
 rather than a collection of independently generated frames. The included checkpoint uses one grayscale channel, 12 frames, and a resolution of 64 by 128 pixels.
 
-The condition $c$ concatenates three tensors for each character: a canonical glyph, a Gaussian position heatmap, and an aligned glyph layout. With at most $K=8$ characters, this gives $3K=24$ condition channels.
+The condition $c$ concatenates two tensors for each character: a canonical glyph and a Gaussian position heatmap. With at most $K=8$ characters, this gives $2K=16$ condition channels. The target layout is deliberately excluded.
 
 ## Conditional path
 
@@ -37,5 +37,4 @@ Sampling begins with a Gaussian-noise video and follows the learned ODE using
 
 $$x_{k+1}=x_k+h\,v_\theta(x_k,t_k,c), \qquad h=1/N.$$
 
-The reported character model uses $N=20$ Euler steps. Its aligned layout is supplied as a condition, but no extra guidance term is applied during sampling.
-
+The reported character model uses $N=20$ Euler steps. Sampling receives only the canonical glyph and position tensors; it does not use a target-aligned layout or an additional guidance term.

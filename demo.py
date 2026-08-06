@@ -29,8 +29,8 @@ def main() -> None:
     args = parser.parse_args()
 
     checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=True)
-    if checkpoint.get("data_mode") != "character":
-        raise ValueError("demo.py expects a character-level checkpoint")
+    if checkpoint.get("data_mode") != "character" or checkpoint["condition_channels"] != 2 * checkpoint["spec"]["max_chars"]:
+        raise ValueError("demo.py expects a character-level glyph-and-position checkpoint")
 
     spec = VideoSpec(**checkpoint["spec"])
     model = ConditionalVideoFlow(
@@ -43,17 +43,15 @@ def main() -> None:
     words = tuple(args.text.split())
     if not words:
         raise ValueError("text must contain at least one word")
-    _, glyphs, positions, layouts = build_character_sequence_condition(words, args.motion, spec)
+    _, glyphs, positions = build_character_sequence_condition(words, args.motion, spec)
     glyphs = glyphs[None].to(args.device)
     positions = positions[None].to(args.device)
-    aligned = layouts[None].to(args.device) if checkpoint.get("aligned_glyph", False) else None
-    video = euler_sample(model, glyphs, positions, args.ode_steps, args.seed, aligned)
+    video = euler_sample(model, glyphs, positions, args.ode_steps, args.seed)
 
     output = args.output or output_name(args.text)
-    save_gif(video[0], output, scale=4, threshold=-0.5, resample="lanczos")
+    save_gif(video[0], output, scale=4, threshold=-0.6, resample="lanczos")
     print(f"saved: {output}")
 
 
 if __name__ == "__main__":
     main()
-

@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 from kinetic_flow.data import KineticTypographyDataset, VideoSpec
-from kinetic_flow.flow import align_glyph_to_positions, euler_sample, flow_matching_loss
+from kinetic_flow.flow import euler_sample, flow_matching_loss
 from kinetic_flow.io import save_gif
 from kinetic_flow.model import ConditionalVideoFlow
 
@@ -30,7 +30,6 @@ def parse_args():
     p.add_argument("--resume", type=Path)
     p.add_argument("--save-every", type=int, default=500)
     p.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
-    p.add_argument("--aligned-glyph", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument("--foreground-weight", type=float, default=0.0,
                    help="Extra flow-loss weight on glyph pixels; useful for sparse text")
     return p.parse_args()
@@ -45,7 +44,7 @@ def main():
     dataset = KineticTypographyDataset(length=max(args.steps * args.batch_size, 1024), spec=spec, seed=args.seed, mode=args.data_mode)
     loader = iter(DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=True, pin_memory=device.type == "cuda"))
     channels_per_condition = args.max_chars if args.data_mode == "character" else 1
-    condition_channels = channels_per_condition * (3 if args.aligned_glyph else 2)
+    condition_channels = channels_per_condition * 2
     model = ConditionalVideoFlow(args.base_channels, condition_channels=condition_channels).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     start_step = 0
@@ -65,7 +64,7 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(), "step": step,
                     "spec": vars(spec), "base_channels": args.base_channels, "data_mode": args.data_mode,
-                    "condition_channels": condition_channels, "aligned_glyph": args.aligned_glyph,
+                    "condition_channels": condition_channels,
                     "foreground_weight": args.foreground_weight}, path)
 
     log_path = args.output.with_suffix(".csv")
@@ -81,13 +80,9 @@ def main():
         target = batch["video"].to(device, non_blocking=True)
         glyph = batch["glyph"].to(device, non_blocking=True)
         positions = batch["positions"].to(device, non_blocking=True)
-        if args.aligned_glyph:
-            aligned = batch["aligned"].to(device, non_blocking=True) if args.data_mode == "character" else align_glyph_to_positions(glyph, positions)
-        else:
-            aligned = None
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
-            loss = flow_matching_loss(model, target, glyph, positions, aligned, args.foreground_weight)
+            loss = flow_matching_loss(model, target, glyph, positions, args.foreground_weight)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -103,11 +98,7 @@ def main():
 
     save_checkpoint(args.output, args.steps)
     model.eval()
-    if args.aligned_glyph:
-        sample_aligned = aligned[:1]
-    else:
-        sample_aligned = None
-    sample = euler_sample(model, glyph[:1], positions[:1], steps=40, seed=args.seed, aligned_glyph=sample_aligned)
+    sample = euler_sample(model, glyph[:1], positions[:1], steps=40, seed=args.seed)
     preview = args.output.with_name("training_preview.gif")
     save_gif(sample[0], preview)
     print(f"checkpoint: {args.output}\npreview: {preview}")

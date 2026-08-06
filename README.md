@@ -1,149 +1,96 @@
-# Kinetic Flow
+# Character-Conditioned Flow Matching for Kinetic Typography
 
-A presentation-sized conditional flow-matching model that generates short kinetic typography videos. It learns a 3D velocity field that transports an entire Gaussian-noise video into readable moving text.
+This repository contains a small conditional flow-matching model that generates 12-frame grayscale typography videos from per-character glyph and position conditions.
 
-The key experiment is explicit conditioning. The model receives:
+![Generated sequence: MAKE, TEXT, MOVE](assets/example_make_text_move.gif)
 
-- a canonical bitmap of the requested word (glyph shape);
-- one Gaussian center heatmap per frame (spatial trajectory);
-- the noisy video and continuous flow time.
+## Quick start
 
-It does **not** receive the final rendered frames as conditioning. A compact 3D U-Net must learn to preserve the glyph while moving it through time.
-
-## Method
-
-For a clean video `x₁`, Gaussian video `x₀`, and random `t ~ U(0,1)`:
-
-```text
-xₜ = (1 - t)x₀ + tx₁
-target velocity = x₁ - x₀
-loss = ||vθ(xₜ, t, glyph, positions) - (x₁ - x₀)||²
-```
-
-At inference, Euler integration transforms fresh noise into a video:
-
-```text
-x ← Gaussian noise
-x ← x + Δt · vθ(x, t, glyph, positions)
-```
-
-## Setup
-
-Python 3.10+ is recommended.
+Python 3.10 or newer is required.
 
 ```bash
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e .
+python demo.py --text "MAKE TEXT MOVE" --motion bounce
 ```
 
-## Train and sample
+The last command loads the included checkpoint and writes `outputs/make_text_move.gif`. CUDA is used automatically when available; CPU also works.
 
-Quick smoke run (checks the pipeline, but is too short for good images):
+## What the model does
+
+The complete video is represented as one tensor rather than generated frame by frame. For each visible character, the condition contains:
+
+- its canonical glyph;
+- a Gaussian heatmap for its position in every frame;
+- the glyph aligned to that position.
+
+The included model supports up to eight characters per displayed word. A sentence such as `MAKE TEXT MOVE` is divided across the 12-frame clip, so the model learns both character motion and word changes.
+
+## Method
+
+Synthetic targets are rendered online with Pillow. A small 3D U-Net learns the velocity from Gaussian noise to a target video along the straight path
+
+$$x_t=(1-t)x_0+t x_1, \qquad u_t=x_1-x_0.$$
+
+At inference time, Euler integration follows the learned velocity field from noise to video. The concise derivation is in [docs/math.md](docs/math.md).
+
+## Repository structure
+
+```text
+demo.py                 minimal inference entry point
+train.py                synthetic-data training loop
+evaluate.py             MSE and Dice evaluation
+sample.py               inference with additional controls
+src/kinetic_flow/data.py  renderer, trajectories, and conditions
+src/kinetic_flow/model.py small conditional 3D U-Net
+src/kinetic_flow/flow.py  flow-matching loss and Euler sampler
+checkpoints/best.pt      included character-level checkpoint
+docs/                   math and experiment notes
+```
+
+Suggested reading order: run `demo.py`, inspect `data.py`, read `flow.py`, then read `model.py`. `train.py` is only needed to reproduce training.
+
+## Reproduce the main experiment
+
+The training data is generated during loading; there is no downloaded dataset. Each sample is determined by the dataset seed and index.
 
 ```bash
-python train.py --steps 10 --batch-size 2 --base-channels 8
+python train.py \
+  --data-mode character --frames 12 --size 64 --width 128 \
+  --glyph-size 42 --max-chars 8 --base-channels 16 --batch-size 4 \
+  --aligned-glyph --foreground-weight 5 --steps 10000 \
+  --output outputs/character/model.pt
+
+python evaluate.py \
+  --checkpoint outputs/character/model.pt \
+  --samples 8 --ode-steps 20
 ```
 
-Useful GPU run:
+Training and sampling options are available through `python train.py --help` and `python sample.py --help`. More runs and ablations are recorded in [docs/experiments.md](docs/experiments.md).
 
-```bash
-python train.py --steps 3000 --batch-size 16
-python sample.py --text FLOW --motion bounce --ode-steps 40
-```
+## Results
 
-English sentences shown one word at a time:
+Both models were evaluated on a fixed synthetic validation set. Dice measures overlap after thresholding the generated glyph pixels.
 
-```bash
-python train.py --steps 10000 --batch-size 16 --base-channels 16 \
-  --frames 8 --size 32 --width 64 --data-mode sentence \
-  --output outputs/english_sentence/model.pt
-python sample.py --checkpoint outputs/english_sentence/model.pt \
-  --sentence "CREATE THE FUTURE" --motion bounce
-```
+| Model | MSE | Dice |
+| --- | ---: | ---: |
+| Word-level baseline | 0.009147 | 0.785849 |
+| Character-level model | **0.000022** | **0.995071** |
 
-For crisp monochrome text, preserve the video aspect ratio and threshold the gray prediction:
+The character result is much stronger partly because the aligned per-character layout is a highly explicit condition. It should be read as a proof that the model can preserve supplied geometry, not as a benchmark on natural video.
 
-```bash
-python sample.py --checkpoint outputs/english_sentence_aligned/model.pt \
-  --sentence "HELLO NEW WORLD" --motion horizontal \
-  --layout-guidance 0.1 --threshold -0.5 --scale 4 --resample lanczos \
-  --output outputs/crisp.gif
-```
+## Design choices and limitations
 
-`sentence` mode produces thousands of short combinations from verbs, nouns, and adjectives. The whole sentence is not squeezed into one tiny frame; its words are assigned to consecutive frame segments, and the glyph condition changes with them.
+- The checkpoint generates uppercase, grayscale, binary-looking glyphs.
+- A displayed word can contain at most eight characters.
+- Sentence timing is predefined rather than inferred from language.
+- Motions come from four procedural trajectory families: horizontal, vertical, bounce, and circle.
+- The renderer uses a single local font and the model has not been tested on real advertising footage.
+- The final character model uses no extra layout guidance during sampling.
 
-For smoother word changes, use 12 frames and cross-fade conditions:
+## References
 
-```bash
-python train.py --steps 10000 --batch-size 8 --base-channels 16 \
-  --frames 12 --size 48 --width 96 --glyph-size 28 --data-mode sentence \
-  --transition crossfade --aligned-glyph --foreground-weight 5 \
-  --output outputs/english_sentence_hq/model.pt
-```
-
-`--aligned-glyph` adds a spatial layout channel computed only from the requested canonical glyph and position heatmap. It is useful when the shallow convolutional model cannot transport exact strokes from the center of a wide canvas to distant target positions.
-
-Because most video pixels are black background, `--foreground-weight 5` prevents the MSE objective from under-emphasizing the relatively sparse character strokes.
-
-Outputs are animated GIFs under `outputs/`. Training data is synthesized online from a small vocabulary and four trajectories, so no dataset download is needed.
-
-### Best validated English-sentence configuration
-
-The current best checkpoint was trained at 64×128 with a 42 px glyph. The recommended inference settings are small layout guidance, a mask threshold, and aspect-preserving Lanczos display scaling:
-
-```bash
-python sample.py --checkpoint outputs/english_sentence_128/model_best.pt \
-  --sentence "MAKE YOUR STORY" --motion bounce --ode-steps 20 \
-  --layout-guidance 0.1 --threshold -0.5 --scale 4 --resample lanczos \
-  --output outputs/final.gif
-```
-
-Reproducible readability evaluation:
-
-```bash
-python evaluate.py --checkpoint outputs/english_sentence_128/model_best.pt \
-  --samples 8 --layout-guidance 0.1 --ode-steps 20
-```
-
-### Character-level kinetic typography
-
-The character model assigns each letter its own glyph channel, position heatmap, aligned layout, and phase-shifted trajectory. Padded channels support words up to eight characters:
-
-```bash
-python train.py --steps 10000 --batch-size 4 --base-channels 16 \
-  --frames 12 --size 64 --width 128 --glyph-size 42 \
-  --data-mode character --max-chars 8 --transition cut \
-  --aligned-glyph --foreground-weight 5 \
-  --output outputs/english_character_128/model.pt
-
-python sample.py --checkpoint outputs/english_character_128/model_best.pt \
-  --sentence "CREATE YOUR STORY" --motion circle --ode-steps 20 \
-  --threshold -0.5 --scale 4 --resample lanczos \
-  --output outputs/character_result.gif
-```
-
-Unlike word-level motion, the characters remain arranged as a readable word while receiving different vertical motion phases.
-
-## Code map
-
-- `src/kinetic_flow/data.py`: glyph rasterization, trajectories, video/condition construction
-- `src/kinetic_flow/model.py`: time-conditioned 3D U-Net velocity field
-- `src/kinetic_flow/flow.py`: conditional flow-matching loss and Euler solver
-- `train.py`: optimization and checkpoint/preview creation
-- `sample.py`: conditional video generation
-- `evaluate.py`: fixed-seed MSE and thresholded glyph Dice evaluation
-
-## Suggested presentation experiment
-
-Train the full model, then ablate either the glyph channel or position channel at inference by replacing it with zeros. Compare (1) text readability, (2) trajectory error from the requested center, and (3) temporal consistency. This directly demonstrates why shape and position conditions are useful beyond a semantic text embedding.
-
-This is intentionally a teaching prototype: 32×32 grayscale frames and a fixed synthetic vocabulary keep the full-video flow model inexpensive. Natural fonts, backgrounds, colors, arbitrary text, and attention-based conditioning are clear extensions rather than hidden complexity.
-
-## Project documentation
-
-- [`docs/PRIME_PRESENTATION.md`](docs/PRIME_PRESENTATION.md): slide-ready final-project narrative
-- [`docs/PROCESS_LOG.md`](docs/PROCESS_LOG.md): implementation decisions and verification record
-- [`docs/TRAINING_LOG.md`](docs/TRAINING_LOG.md): chronological English-sentence training record
-- [`docs/PRIME_FINAL_PROJECT.tex`](docs/PRIME_FINAL_PROJECT.tex): 30-frame Beamer final-project deck
+- Lipman et al., [Flow Matching for Generative Modeling](https://arxiv.org/abs/2210.02747), 2022.
+- Chen et al., [TextDiffuser: Diffusion Models as Text Painters](https://arxiv.org/abs/2305.10855), 2023.
